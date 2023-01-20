@@ -203,6 +203,7 @@ func guardrailCodeRefs(flag ldapi.FeatureFlag) (bool) {
 
     stats, r, err := client.CodeReferencesApi.GetStatistics(ctx, projectKey).FlagKey(flag.Key).Execute()
     if err != nil {
+        fmt.Fprintf(os.Stderr, "Code references is an Enterprise feature. Your LaunchDarkly account must be on an Enterprise plan to check repository safety in this script.\n")
         fmt.Fprintf(os.Stderr, "Error when calling `CodeReferencesApi.GetStatistics``: %v\n", err)
         fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
     }
