@@ -116,7 +116,10 @@ func Migrate() {
     }
 
     fmt.Println()
-    fmt.Fprintf(os.Stdout, "%v flags found. %v are safe to migrate, %v aren't safe to migrate per the specified guardrails, and %v do not need to be migrated.\n", len(flags.Items), cntMigrateReady, cntGuardrail, cntNotNeeded)
+    fmt.Fprintf(os.Stdout, "%v flag(s) found.\n", len(flags.Items))
+    fmt.Fprintf(os.Stdout, " - %v flag(s) contain user targeting and are safe to migrate.\n", cntMigrateReady)
+    fmt.Fprintf(os.Stdout, " - %v flag(s) aren't safe to migrate per the specified guardrails.\n", cntGuardrail)
+    fmt.Fprintf(os.Stdout, " - %v flag(s) do not need to be migrated.\n", cntNotNeeded)
 }
 
 func inspectFlag(flag ldapi.FeatureFlag) (bool, bool) {
@@ -203,7 +206,7 @@ func guardrailCodeRefs(flag ldapi.FeatureFlag) (bool) {
 
     stats, r, err := client.CodeReferencesApi.GetStatistics(ctx, projectKey).FlagKey(flag.Key).Execute()
     if err != nil {
-        fmt.Fprintf(os.Stderr, "Code references is an Enterprise feature. Your LaunchDarkly account must be on an Enterprise plan to check repository safety in this script.\n")
+        fmt.Fprintf(os.Stderr, "Code references is an Enterprise feature. Your LaunchDarkly account must be on an Enterprise plan to use this guardrail.\n")
         fmt.Fprintf(os.Stderr, "Error when calling `CodeReferencesApi.GetStatistics``: %v\n", err)
         fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
     }
