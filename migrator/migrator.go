@@ -15,6 +15,7 @@ var (
     projectKey         string
     envKey             string
     host               string
+	migrateToKind      string
     repos              []string
     client             *ldapi.APIClient
     ctx                context.Context
@@ -24,6 +25,24 @@ const userKind = "user"
 const defaultProject = "default"
 const defaultEnv = "production"
 const defaultHost = "https://app.launchdarkly.com"
+
+type targetInfo struct {
+    target    ldapi.Target
+    variation ldapi.Variation
+}
+
+type member struct {
+    email string
+    id    string
+}
+
+type flagDetails struct {
+    targetUserRefs     []targetInfo
+    ruleUserRefs       []ldapi.Rule
+    guardrailsViolated bool
+    maintainerTeamKey  string
+    maintainerMember   member
+}
 
 func init() {
     args()
@@ -89,6 +108,13 @@ func args() {
             repos = append(repos, repo)
         }
     }
+
+    migrateToKind = os.Getenv("MIGRATE_TO_KIND")
+    if migrateToKind == "" {
+        fmt.Fprintf(os.Stdout, "MIGRATE_TO_KIND is unspecified: using default behavior of running a dry-run\n")
+    } else {
+        fmt.Fprintf(os.Stdout, "MIGRATE_TO_KIND is provided: %v\n", migrateToKind)
+    }
 }
 
 func Migrate() {
@@ -104,15 +130,19 @@ func Migrate() {
     cntNotNeeded := 0
 
     for _, flag := range flags.Items {
-        targetsUsers, guardrails := inspectFlag(flag)
+        details := inspectFlag(flag)
         
-        if guardrails {
+        if details.guardrailsViolated {
             cntGuardrail++
-        } else if targetsUsers {
+        } else if isFlagTargetingUsers(details) {
             cntMigrateReady++
         } else {
             cntNotNeeded++
         }
+
+		if (isFlagTargetingUsers(details) && !details.guardrailsViolated && migrateToKind != "") {
+			submitApproval(flag, details)
+		}
     }
 
     fmt.Println()
@@ -122,61 +152,93 @@ func Migrate() {
     fmt.Fprintf(os.Stdout, " - %v flag(s) do not need to be migrated.\n", cntNotNeeded)
 }
 
-func inspectFlag(flag ldapi.FeatureFlag) (bool, bool) {
-    targetsUsers := false
-    guardrails := false
+func isFlagTargetingUsers(details flagDetails) bool {
+    return len(details.targetUserRefs) > 0 || len(details.ruleUserRefs) > 0
+}
 
+func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
     flagConfig := flag.Environments[envKey]
-    targets := flagConfig.Targets
-    contextTargets := flagConfig.ContextTargets
-    rules := flagConfig.Rules
+    details := flagDetails{}
     
-    for _, target := range targets {
+    for _, target := range flagConfig.Targets {
         if (*target.ContextKind == userKind) {
-            targetsUsers = true
+            details.targetUserRefs = append(details.targetUserRefs, targetInfo{target, flag.Variations[target.Variation]})
         }
     }
 
-    for _, target := range contextTargets {
-        if (*target.ContextKind == userKind) {
-            targetsUsers = true
-        }
-    }
-
-    for _, rule := range rules {
+    for _, rule := range flagConfig.Rules {
         for _, clause := range rule.Clauses {
             if (*clause.ContextKind == userKind) {
-                targetsUsers = true
+                details.ruleUserRefs = append(details.ruleUserRefs, rule)
             }
         }
     }
 
-    if targetsUsers {
-        maintainerType, maintainer := getMaintainer(flag)
-        guardrails = checkGuardrails(flag)
+    if isFlagTargetingUsers(details) {
+        maintainerTeamKey, maintainerMemberId, maintainerMemberEmail := getMaintainer(flag)
+        details.maintainerTeamKey = maintainerTeamKey
+        details.maintainerMember = member{maintainerMemberEmail, maintainerMemberId}
+        details.guardrailsViolated = checkGuardrails(flag)
 
-        if (guardrails) {
+        if (details.guardrailsViolated) {
             fmt.Fprintf(os.Stdout, "Flag %v is not safe to be migrated because of the specified guardrails.\n", flag.Key)
         } else {
+            maintainerType := "undefined"
+            maintainer := "n/a"
+            if details.maintainerMember.email != "" {
+                maintainerType = "member"
+                maintainer = details.maintainerMember.email
+            } else if details.maintainerTeamKey != "" {
+                maintainerType = "team"
+                maintainer = details.maintainerTeamKey
+            }
             fmt.Fprintf(os.Stdout, "Flag %v is safe to be migrated by the %v maintainer (%v).\n", flag.Key, maintainerType, maintainer)
         }
     }
 
-    return targetsUsers, guardrails
+    return details
 }
 
-func getMaintainer(flag ldapi.FeatureFlag) (string, string) {
-    maintainerType := "no"
-    maintainer := "n/a"
-    if flag.MaintainerTeamKey != nil {
-        maintainerType = "team"
-        maintainer = *flag.MaintainerTeamKey
-    } else if flag.MaintainerId != nil {
-        maintainerType = "member"
-        maintainer = flag.Maintainer.Email //*flag.MaintainerId
+func submitApproval(flag ldapi.FeatureFlag, details flagDetails) {
+    instructions := []map[string]interface{}{}
+	
+    for _, target := range details.targetUserRefs {
+        instructions = append(instructions, map[string]interface{}{
+            "kind": interface{}("addTargets"),
+            "contextKind": interface{}(migrateToKind),
+            "values": interface{}(target.target.Values),
+            "variationId": interface{}(target.variation.Id),
+        })
+    }
+    req := *ldapi.NewCreateFlagConfigApprovalRequestRequest("Migrating this flag's user targeting to use the " + migrateToKind + " context kind", instructions)
+    if details.maintainerMember.id != "" {
+        req.NotifyMemberIds = []string{details.maintainerMember.id}
+    } else if details.maintainerTeamKey != "" {
+        req.NotifyTeamKeys = []string{details.maintainerTeamKey}
     }
 
-    return maintainerType, maintainer
+    _, r, err := client.ApprovalsApi.PostApprovalRequest(ctx, projectKey, flag.Key, envKey).CreateFlagConfigApprovalRequestRequest(req).Execute()
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error when calling `FeatureFlagsBetaApi.GetDependentFlagsByEnv``: %v\n", err)
+        fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
+    } else {
+        fmt.Fprintf(os.Stdout, "Approval request submitted for flag %v!\n", flag.Key)
+    }
+}
+
+func getMaintainer(flag ldapi.FeatureFlag) (string, string, string) {
+    maintainerTeamKey := ""
+    maintainerMemberId := ""
+    maintainerMemberEmail := ""
+
+    if flag.MaintainerTeamKey != nil {
+        maintainerTeamKey = *flag.MaintainerTeamKey
+    } else if flag.MaintainerId != nil {
+        maintainerMemberId = *flag.MaintainerId
+        maintainerMemberEmail = flag.Maintainer.Email
+    }
+
+    return maintainerTeamKey, maintainerMemberId, maintainerMemberEmail
 }
 
 func checkGuardrails(flag ldapi.FeatureFlag) (bool) {
