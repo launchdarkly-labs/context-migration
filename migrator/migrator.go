@@ -129,6 +129,8 @@ func Migrate() {
     cntGuardrail := 0
     cntNotNeeded := 0
 
+    safeToMigrateBonusText := ""
+
     for _, flag := range flags.Items {
         details := inspectFlag(flag)
         
@@ -140,14 +142,15 @@ func Migrate() {
             cntNotNeeded++
         }
 
-		if (isFlagTargetingUsers(details) && !details.guardrailsViolated && migrateToKind != "") {
+        if (isFlagTargetingUsers(details) && !details.guardrailsViolated && migrateToKind != "") {
 			submitApproval(flag, details)
+            safeToMigrateBonusText = " Approval(s) have been submitted to flag maintainers for review."
 		}
     }
 
     fmt.Println()
     fmt.Fprintf(os.Stdout, "%v flag(s) found.\n", len(flags.Items))
-    fmt.Fprintf(os.Stdout, " - %v flag(s) contain user targeting and are safe to migrate.\n", cntMigrateReady)
+    fmt.Fprintf(os.Stdout, " - %v flag(s) contain user targeting and are safe to migrate.%v\n", cntMigrateReady, safeToMigrateBonusText)
     fmt.Fprintf(os.Stdout, " - %v flag(s) aren't safe to migrate per the specified guardrails.\n", cntGuardrail)
     fmt.Fprintf(os.Stdout, " - %v flag(s) do not need to be migrated.\n", cntNotNeeded)
 }
@@ -206,6 +209,12 @@ func submitApproval(flag ldapi.FeatureFlag, details flagDetails) {
         instructions = append(instructions, map[string]interface{}{
             "kind": interface{}("addTargets"),
             "contextKind": interface{}(migrateToKind),
+            "values": interface{}(target.target.Values),
+            "variationId": interface{}(target.variation.Id),
+        })
+        instructions = append(instructions, map[string]interface{}{
+            "kind": interface{}("removeTargets"),
+            "contextKind": interface{}(userKind),
             "values": interface{}(target.target.Values),
             "variationId": interface{}(target.variation.Id),
         })
