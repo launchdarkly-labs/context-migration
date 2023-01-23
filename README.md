@@ -25,3 +25,4 @@ You may add the following arguments to customize your results.
 * `ENVIRONMENT_KEY`: The environment key. Defaults to `production`.
 * `REPOSITORIES`: A comma-separated list of repository names (as used by [Code References](https://docs.launchdarkly.com/home/code/code-references)) to be used within a guardrail in the script. Repositories named in this argument will be considered ready for the migration and omitted repositories will be considered not ready. If unspecified, the script defaults to behavior where all repositories are considered ready.
 * `MIGRATE_TO_KIND`: The context kind to migrate to from `user`. If unspecified, this script defaults to behavior where the script only does a dry-run and does not migrate any data.
+* `BACKUP_MAINTAINER`: The member id of the user who should be notified about approvals for flags where no maintainer is set. Defaults to none. You can get the member id by extracting it from the URL on the manage member page.

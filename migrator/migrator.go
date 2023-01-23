@@ -16,6 +16,7 @@ var (
     envKey             string
     host               string
 	migrateToKind      string
+    backupMaintainer   string
     repos              []string
     client             *ldapi.APIClient
     ctx                context.Context
@@ -115,6 +116,13 @@ func args() {
     } else {
         fmt.Fprintf(os.Stdout, "MIGRATE_TO_KIND is provided: %v\n", migrateToKind)
     }
+
+    backupMaintainer = os.Getenv("BACKUP_MAINTAINER")
+    if backupMaintainer == "" {
+        fmt.Fprintf(os.Stdout, "BACKUP_MAINTAINER is unspecified: using default behavior of having no backup maintainer\n")
+    } else {
+        fmt.Fprintf(os.Stdout, "BACKUP_MAINTAINER is provided: %v\n", backupMaintainer)
+    }
 }
 
 func Migrate() {
@@ -194,6 +202,9 @@ func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
             } else if details.maintainerTeamKey != "" {
                 maintainerType = "team"
                 maintainer = details.maintainerTeamKey
+            } else if backupMaintainer != ""{
+                maintainerType = "backup"
+                maintainer = backupMaintainer
             }
             fmt.Fprintf(os.Stdout, "Flag %v is safe to be migrated by the %v maintainer (%v).\n", flag.Key, maintainerType, maintainer)
         }
@@ -203,8 +214,10 @@ func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
 }
 
 func submitApproval(flag ldapi.FeatureFlag, details flagDetails) {
+    description := "Migrating this flag's user targeting to use the " + migrateToKind + " context kind"
     instructions := []map[string]interface{}{}
 	
+    // Add instructions to migrate individual targets
     for _, target := range details.targetUserRefs {
         instructions = append(instructions, map[string]interface{}{
             "kind": interface{}("addTargets"),
@@ -219,11 +232,20 @@ func submitApproval(flag ldapi.FeatureFlag, details flagDetails) {
             "variationId": interface{}(target.variation.Id),
         })
     }
-    req := *ldapi.NewCreateFlagConfigApprovalRequestRequest("Migrating this flag's user targeting to use the " + migrateToKind + " context kind", instructions)
+
+    // Add instructions to migrate rules TODO
+
+    // Add instructions to migrate percent rollouts (?) TODO
+
+    req := *ldapi.NewCreateFlagConfigApprovalRequestRequest(description, instructions)
+
+    // Add the maintainer
     if details.maintainerMember.id != "" {
         req.NotifyMemberIds = []string{details.maintainerMember.id}
     } else if details.maintainerTeamKey != "" {
         req.NotifyTeamKeys = []string{details.maintainerTeamKey}
+    } else if backupMaintainer != ""{
+        req.NotifyMemberIds = []string{backupMaintainer}
     }
 
     _, r, err := client.ApprovalsApi.PostApprovalRequest(ctx, projectKey, flag.Key, envKey).CreateFlagConfigApprovalRequestRequest(req).Execute()
