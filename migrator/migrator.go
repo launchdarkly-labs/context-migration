@@ -3,9 +3,12 @@ package migrator
 import (
     "context"
     "fmt"
+    "io/ioutil"
     "log"
     "os"
     "strings"
+
+    "gopkg.in/yaml.v3"
 
     ldapi "github.com/launchdarkly/api-client-go/v10"
 )
@@ -15,14 +18,17 @@ var (
     projectKey         string
     envKey             string
     host               string
-	migrateToKind      string
     backupMaintainer   string
+    schemaFile         string
     repos              []string
+    migrate            bool
+    schema             map[string]attributeSchema
     client             *ldapi.APIClient
     ctx                context.Context
 )
 
 const userKind = "user"
+const keyAttribute = "key"
 const defaultProject = "default"
 const defaultEnv = "production"
 const defaultHost = "https://app.launchdarkly.com"
@@ -32,6 +38,11 @@ type targetInfo struct {
     variation ldapi.Variation
 }
 
+type ruleInfo struct {
+    ruleId    string
+    clauses   []ldapi.Clause
+}
+
 type member struct {
     email string
     id    string
@@ -39,14 +50,20 @@ type member struct {
 
 type flagDetails struct {
     targetUserRefs     []targetInfo
-    ruleUserRefs       []ldapi.Rule
+    ruleUserRefs       []ruleInfo
     guardrailsViolated bool
     maintainerTeamKey  string
     maintainerMember   member
 }
 
+type attributeSchema struct {
+     Kind       string
+     Attribute  string
+}
+
 func init() {
     args()
+    prepareSchema()
 
     config := ldapi.NewConfiguration()
     config.Servers = ldapi.ServerConfigurations{
@@ -64,8 +81,6 @@ func init() {
 
     ctx = context.Background()
     ctx = context.WithValue(ctx, ldapi.ContextAPIKeys, auth)
-
-    fmt.Println()
 }
 
 func args() {
@@ -78,51 +93,93 @@ func args() {
     projectKey = os.Getenv("PROJECT_KEY")
     if projectKey == "" {
         projectKey = defaultProject
-        fmt.Fprintf(os.Stdout, "PROJECT_KEY is unspecified: using default value of %v\n", defaultProject)
+        fmt.Printf("PROJECT_KEY is unspecified: using default value of %v\n", defaultProject)
     } else {
-        fmt.Fprintf(os.Stdout, "PROJECT_KEY is provided: %v\n", projectKey)
+        fmt.Printf("PROJECT_KEY is provided: %v\n", projectKey)
     }
 
     envKey = os.Getenv("ENVIRONMENT_KEY")
     if envKey == "" {
         envKey = defaultEnv
-        fmt.Fprintf(os.Stdout, "ENVIRONMENT_KEY is unspecified: using default value of %v\n", defaultEnv)
+        fmt.Printf("ENVIRONMENT_KEY is unspecified: using default value of %v\n", defaultEnv)
     } else {
-        fmt.Fprintf(os.Stdout, "ENVIRONMENT_KEY is provided: %v\n", envKey)
+        fmt.Printf("ENVIRONMENT_KEY is provided: %v\n", envKey)
     }
 
     host = os.Getenv("LD_HOST")
     if host == "" {
         host = defaultHost
-        fmt.Fprintf(os.Stdout, "LD_HOST is unspecified: using default value of %v\n", defaultHost)
+        fmt.Printf("LD_HOST is unspecified: using default value of %v\n", defaultHost)
     } else {
-        fmt.Fprintf(os.Stdout, "LD_HOST is provided: %v\n", host)
+        fmt.Printf("LD_HOST is provided: %v\n", host)
     }
 
     repoArg := os.Getenv("REPOSITORIES")
     if repoArg == "" {
-        fmt.Fprintf(os.Stdout, "REPOSITORIES is unspecified: using default behavior where all repositories are ready\n")
+        fmt.Printf("REPOSITORIES is unspecified: using default behavior where all repositories are ready\n")
     } else {
-        fmt.Fprintf(os.Stdout, "REPOSITORIES is provided: %v\n", repoArg)
+        fmt.Printf("REPOSITORIES is provided: %v\n", repoArg)
         repoNames := strings.Split(repoArg, ",")
         for _, repo := range repoNames {
             repos = append(repos, repo)
         }
     }
 
-    migrateToKind = os.Getenv("MIGRATE_TO_KIND")
-    if migrateToKind == "" {
-        fmt.Fprintf(os.Stdout, "MIGRATE_TO_KIND is unspecified: using default behavior of running a dry-run\n")
+    schemaFile = os.Getenv("SCHEMA_FILE")
+    if schemaFile == "" {
+        fmt.Printf("SCHEMA_FILE is unspecified: using default behavior of having no schema\n")
     } else {
-        fmt.Fprintf(os.Stdout, "MIGRATE_TO_KIND is provided: %v\n", migrateToKind)
+        fmt.Printf("SCHEMA_FILE is provided: %v\n", schemaFile)
+    }
+
+    migrateArg := os.Getenv("MIGRATE")
+    if migrateArg == "" {
+        migrate = false
+        fmt.Printf("MIGRATE is unspecified: using default behavior of running a dry-run\n")
+    } else if schemaFile != "" {
+        migrate = true
+        fmt.Printf("MIGRATE is provided: the script will run the migration!\n")
+    } else {
+        log.Fatal("MIGRATE is provided but SCHEMA_FILE is not. SCHEMA_FILE must also be provided to run the migration.")
+        os.Exit(4)
     }
 
     backupMaintainer = os.Getenv("BACKUP_MAINTAINER")
     if backupMaintainer == "" {
-        fmt.Fprintf(os.Stdout, "BACKUP_MAINTAINER is unspecified: using default behavior of having no backup maintainer\n")
+        fmt.Printf("BACKUP_MAINTAINER is unspecified: using default behavior of having no backup maintainer\n")
     } else {
-        fmt.Fprintf(os.Stdout, "BACKUP_MAINTAINER is provided: %v\n", backupMaintainer)
+        fmt.Printf("BACKUP_MAINTAINER is provided: %v\n", backupMaintainer)
     }
+
+    fmt.Println()
+}
+
+func prepareSchema() {
+    if schemaFile == "" {
+        return
+    }
+
+    file, err := ioutil.ReadFile(schemaFile)
+
+    if err != nil {
+         log.Fatal(err)
+         os.Exit(2)
+    }
+
+    schema = make(map[string]attributeSchema)
+    err = yaml.Unmarshal(file, &schema)
+
+    if err != nil {
+         log.Fatal(err)
+         os.Exit(3)
+    }
+
+    fmt.Println("Using the following schema mappings:")
+    for userAttribute, newAttribute := range schema {
+         fmt.Printf("  %s: %s\n", userAttribute, newAttribute)
+    }
+
+    fmt.Println()
 }
 
 func Migrate() {
@@ -131,7 +188,7 @@ func Migrate() {
         fmt.Fprintf(os.Stderr, "Error when calling `FeatureFlagsApi.GetFeatureFlags``: %v\n", err)
         fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
     }
-    fmt.Fprintf(os.Stdout, "Inspecting flags for project %v and environment %v.\n", projectKey, envKey)
+    fmt.Printf("Inspecting flags for project '%v' and environment '%v'.\n", projectKey, envKey)
 
     cntMigrateReady := 0
     cntGuardrail := 0
@@ -150,17 +207,19 @@ func Migrate() {
             cntNotNeeded++
         }
 
-        if (isFlagTargetingUsers(details) && !details.guardrailsViolated && migrateToKind != "") {
-			submitApproval(flag, details)
-            safeToMigrateBonusText = " Approval(s) have been submitted to flag maintainers for review."
+        if isFlagTargetingUsers(details) && !details.guardrailsViolated && len(schema) > 0 {
+			prepareApproval(flag, details)
+            if migrate {
+                safeToMigrateBonusText = " Approval(s) have been submitted to flag maintainers for review."
+            }
 		}
     }
 
     fmt.Println()
-    fmt.Fprintf(os.Stdout, "%v flag(s) found.\n", len(flags.Items))
-    fmt.Fprintf(os.Stdout, " - %v flag(s) contain user targeting and are safe to migrate.%v\n", cntMigrateReady, safeToMigrateBonusText)
-    fmt.Fprintf(os.Stdout, " - %v flag(s) aren't safe to migrate per the specified guardrails.\n", cntGuardrail)
-    fmt.Fprintf(os.Stdout, " - %v flag(s) do not need to be migrated.\n", cntNotNeeded)
+    fmt.Printf("%v flag(s) found.\n", len(flags.Items))
+    fmt.Printf(" - %v flag(s) contain user targeting and are safe to migrate.%v\n", cntMigrateReady, safeToMigrateBonusText)
+    fmt.Printf(" - %v flag(s) aren't safe to migrate per the specified guardrails.\n", cntGuardrail)
+    fmt.Printf(" - %v flag(s) do not need to be migrated.\n", cntNotNeeded)
 }
 
 func isFlagTargetingUsers(details flagDetails) bool {
@@ -172,16 +231,21 @@ func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
     details := flagDetails{}
     
     for _, target := range flagConfig.Targets {
-        if (*target.ContextKind == userKind) {
+        if *target.ContextKind == userKind {
             details.targetUserRefs = append(details.targetUserRefs, targetInfo{target, flag.Variations[target.Variation]})
         }
     }
 
     for _, rule := range flagConfig.Rules {
+        clauses := make([]ldapi.Clause, 0)
         for _, clause := range rule.Clauses {
-            if (*clause.ContextKind == userKind) {
-                details.ruleUserRefs = append(details.ruleUserRefs, rule)
+            if *clause.ContextKind == userKind {
+                clauses = append(clauses, clause)
             }
+        }
+
+        if len(clauses) > 0 {
+            details.ruleUserRefs = append(details.ruleUserRefs, ruleInfo{*rule.Id, clauses})
         }
     }
 
@@ -191,8 +255,8 @@ func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
         details.maintainerMember = member{maintainerMemberEmail, maintainerMemberId}
         details.guardrailsViolated = checkGuardrails(flag)
 
-        if (details.guardrailsViolated) {
-            fmt.Fprintf(os.Stdout, "Flag %v is not safe to be migrated because of the specified guardrails.\n", flag.Key)
+        if details.guardrailsViolated {
+            fmt.Printf("Flag '%v' is not safe to be migrated because of the specified guardrails.\n", flag.Key)
         } else {
             maintainerType := "undefined"
             maintainer := "n/a"
@@ -206,55 +270,109 @@ func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
                 maintainerType = "backup"
                 maintainer = backupMaintainer
             }
-            fmt.Fprintf(os.Stdout, "Flag %v is safe to be migrated by the %v maintainer (%v).\n", flag.Key, maintainerType, maintainer)
+            fmt.Printf("Flag '%v' is safe to be migrated by the %v maintainer (%v).\n", flag.Key, maintainerType, maintainer)
         }
     }
 
     return details
 }
 
-func submitApproval(flag ldapi.FeatureFlag, details flagDetails) {
-    description := "Migrating this flag's user targeting to use the " + migrateToKind + " context kind"
+func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) {
     instructions := []map[string]interface{}{}
 	
     // Add instructions to migrate individual targets
     for _, target := range details.targetUserRefs {
-        instructions = append(instructions, map[string]interface{}{
-            "kind": interface{}("addTargets"),
-            "contextKind": interface{}(migrateToKind),
-            "values": interface{}(target.target.Values),
-            "variationId": interface{}(target.variation.Id),
-        })
-        instructions = append(instructions, map[string]interface{}{
-            "kind": interface{}("removeTargets"),
-            "contextKind": interface{}(userKind),
-            "values": interface{}(target.target.Values),
-            "variationId": interface{}(target.variation.Id),
-        })
+        mapping, isMapped := schema[keyAttribute]
+
+        if isMapped {
+            instructions = append(instructions, map[string]interface{}{
+                "kind": interface{}("addTargets"),
+                "contextKind": interface{}(mapping.Kind),
+                "values": interface{}(target.target.Values),
+                "variationId": interface{}(target.variation.Id),
+            })
+            instructions = append(instructions, map[string]interface{}{
+                "kind": interface{}("removeTargets"),
+                "contextKind": interface{}(userKind),
+                "values": interface{}(target.target.Values),
+                "variationId": interface{}(target.variation.Id),
+            })
+            fmt.Printf("  Adding instructions to migrate individual user targets to context kind '%v'.\n", schema[keyAttribute].Kind)
+        } else {
+            fmt.Printf("  Skipping individual user targets because no '%v' mapping was provided.\n", keyAttribute)
+        }
     }
 
-    // Add instructions to migrate rules TODO
-
-    // Add instructions to migrate percent rollouts (?) TODO
-
-    req := *ldapi.NewCreateFlagConfigApprovalRequestRequest(description, instructions)
-
-    // Add the maintainer
-    if details.maintainerMember.id != "" {
-        req.NotifyMemberIds = []string{details.maintainerMember.id}
-    } else if details.maintainerTeamKey != "" {
-        req.NotifyTeamKeys = []string{details.maintainerTeamKey}
-    } else if backupMaintainer != ""{
-        req.NotifyMemberIds = []string{backupMaintainer}
+    // Add instructions to migrate rules
+    for _, rule := range details.ruleUserRefs {
+        toAdd, toRemove := toInstructionClauses(rule.clauses)
+        if len(toAdd) > 0 && len(toRemove) > 0 {
+            instructions = append(instructions, map[string]interface{}{
+                "kind": interface{}("addClauses"),
+                "ruleId": interface{}(rule.ruleId),
+                "clauses": toAdd,
+            })
+            instructions = append(instructions, map[string]interface{}{
+                "kind": interface{}("removeClauses"),
+                "ruleId": interface{}(rule.ruleId),
+                "clauses": toRemove,
+            })
+        }
     }
 
-    _, r, err := client.ApprovalsApi.PostApprovalRequest(ctx, projectKey, flag.Key, envKey).CreateFlagConfigApprovalRequestRequest(req).Execute()
-    if err != nil {
-        fmt.Fprintf(os.Stderr, "Error when calling `FeatureFlagsBetaApi.GetDependentFlagsByEnv``: %v\n", err)
-        fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
-    } else {
-        fmt.Fprintf(os.Stdout, "Approval request submitted for flag %v!\n", flag.Key)
+    // Add instructions to migrate percent rollouts
+    // TODO
+
+    if migrate {
+        if len(instructions) > 0 {
+            description := "Migrating " + flag.Key + " to use custom contexts."
+            req := *ldapi.NewCreateFlagConfigApprovalRequestRequest(description, instructions)
+        
+            // Add the maintainer
+            if details.maintainerMember.id != "" {
+                req.NotifyMemberIds = []string{details.maintainerMember.id}
+            } else if details.maintainerTeamKey != "" {
+                req.NotifyTeamKeys = []string{details.maintainerTeamKey}
+            } else if backupMaintainer != ""{
+                req.NotifyMemberIds = []string{backupMaintainer}
+            }
+
+            _, r, err := client.ApprovalsApi.PostApprovalRequest(ctx, projectKey, flag.Key, envKey).CreateFlagConfigApprovalRequestRequest(req).Execute()
+            if err != nil {
+                fmt.Fprintf(os.Stderr, "Error when calling `FeatureFlagsBetaApi.GetDependentFlagsByEnv``: %v\n", err)
+                fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
+            } else {
+                fmt.Printf("  Approval request submitted for flag '%v'!\n", flag.Key)
+            }
+        } else {
+            fmt.Printf("  Skipping approval for flag '%v' because no mappings were provided.\n", flag.Key)
+        }
     }
+}
+
+func toInstructionClauses(clauses []ldapi.Clause) ([]map[string]interface{}, []string) {
+    toAdd := []map[string]interface{}{}
+    toRemove := []string{}
+
+    for _, clause := range clauses {
+        mapping, isMapped := schema[clause.Attribute]
+
+        if isMapped {
+            toAdd = append(toAdd, map[string]interface{}{
+                "attribute": interface{}(mapping.Attribute),
+                "contextKind": interface{}(mapping.Kind),
+                "negate": interface{}(clause.Negate),
+                "op": interface{}(clause.Op),
+                "values": interface{}(clause.Values),
+            })
+            toRemove = append(toRemove, *clause.Id)
+            fmt.Printf("  Adding instructions to migrate a rule clause for user attribute '%v' to context kind '%v' and attribute '%v'.\n", clause.Attribute, mapping.Kind, mapping.Attribute)
+        } else {
+            fmt.Printf("  Skipping targeting rule clause for user attribute '%v' because no mapping was provided.\n", clause.Attribute)
+        }
+    }
+
+    return toAdd, toRemove
 }
 
 func getMaintainer(flag ldapi.FeatureFlag) (string, string, string) {
@@ -292,7 +410,7 @@ func guardrailPrereq(flag ldapi.FeatureFlag) (bool) {
 }
 
 func guardrailCodeRefs(flag ldapi.FeatureFlag) (bool) {
-    if (len(repos) == 0) {
+    if len(repos) == 0 {
         // skip the guardrail check because all repos are "ready"
         return false
     }
