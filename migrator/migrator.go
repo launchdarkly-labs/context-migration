@@ -46,6 +46,7 @@ type targetInfo struct {
 type ruleInfo struct {
     ruleId    string
     clauses   []ldapi.Clause
+    rollout   *ldapi.Rollout
 }
 
 type member struct {
@@ -252,8 +253,8 @@ func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
             }
         }
 
-        if len(clauses) > 0 {
-            details.ruleUserRefs = append(details.ruleUserRefs, ruleInfo{*rule.Id, clauses})
+        if len(clauses) > 0 || rule.Rollout != nil {
+            details.ruleUserRefs = append(details.ruleUserRefs, ruleInfo{*rule.Id, clauses, rule.Rollout})
         }
     }
 
@@ -320,6 +321,7 @@ func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) {
 
     // Add instructions to migrate rules
     for _, rule := range details.ruleUserRefs {
+        // Rule clauses
         toAdd, toRemove := toInstructionClauses(rule.clauses)
         if len(toAdd) > 0 && len(toRemove) > 0 {
             instructions = append(instructions, map[string]interface{}{
@@ -333,29 +335,19 @@ func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) {
                 "clauses": toRemove,
             })
         }
+
+        // Rule rollouts
+        instruction := handleRollout(flag, rule.rollout, &rule.ruleId)
+        if instruction != nil {
+            instructions = append(instructions, *instruction)
+        }
     }
 
     // Add instructions to migrate fallthrough rollouts
     if details.fallthroughRollout != nil {
-        rollout := *details.fallthroughRollout
-        
-        attribute := keyAttribute
-        if rollout.BucketBy != nil {
-            attribute = *rollout.BucketBy
-        }
-        mapping, isMapped := schema[attribute]
-
-        if isMapped {
-            instructions = append(instructions, map[string]interface{}{
-                "kind": interface{}("updateFallthroughVariationOrRollout"),
-                "rolloutContextKind": interface{}(mapping.Kind),
-                "rolloutBucketBy": interface{}(mapping.Attribute),
-                "rolloutWeights": toRolloutWeights(flag, rollout.Variations),
-            })
-
-            fmt.Printf("  Adding an instruction to replace the fallthrough rollout for user attribute '%v' with a fallthrough rollout for '%v' attribute '%v'.\n", attribute, mapping.Kind, mapping.Attribute)
-        } else {
-            fmt.Printf("  Skipping the fallthrough rollout for user attribute '%v' because no mapping was provided.\n", attribute)
+        instruction := handleRollout(flag, details.fallthroughRollout, nil)
+        if instruction != nil {
+            instructions = append(instructions, *instruction)
         }
     }
 
@@ -383,6 +375,40 @@ func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) {
         } else {
             fmt.Printf("  Skipping the approval for flag '%v' because no mappings were provided.\n", flag.Key)
         }
+    }
+}
+
+func handleRollout(flag ldapi.FeatureFlag, rollout *ldapi.Rollout, ruleId *string) *map[string]interface{} {
+    rolloutType := "a rule"
+    instructionKind := "updateRuleVariationOrRollout"
+    if ruleId == nil {
+        rolloutType = "the fallthrough"
+        instructionKind = "updateFallthroughVariationOrRollout"
+    }
+
+    attribute := keyAttribute
+    if rollout.BucketBy != nil {
+        attribute = *rollout.BucketBy
+    }
+    mapping, isMapped := schema[attribute]
+
+    if isMapped {
+        fmt.Printf("  Adding an instruction to replace %v rollout for user attribute '%v' with %v rollout for '%v' attribute '%v'.\n", rolloutType, attribute, rolloutType, mapping.Kind, mapping.Attribute)
+        instruction := map[string]interface{}{
+            "kind": interface{}(instructionKind),
+            "rolloutContextKind": interface{}(mapping.Kind),
+            "rolloutBucketBy": interface{}(mapping.Attribute),
+            "rolloutWeights": toRolloutWeights(flag, rollout.Variations),
+        }
+
+        if ruleId != nil {
+            instruction["ruleId"] = interface{}(ruleId)
+        }
+
+        return &instruction
+    } else {
+        fmt.Printf("  Skipping the fallthrough rollout for user attribute '%v' because no mapping was provided.\n", attribute)
+        return nil
     }
 }
 
