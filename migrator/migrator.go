@@ -32,6 +32,11 @@ const keyAttribute = "key"
 const defaultProject = "default"
 const defaultEnv = "production"
 const defaultHost = "https://app.launchdarkly.com"
+var attributesToIgnore = []string{
+    "segmentMatch",     // TODO currently lacking segment and segment operator support
+    "not-segmentMatch", // TODO currently lacking segment and segment operator support
+    "kind",             // This attribute is new and fine and doesn't need to be migrated
+}
 
 type targetInfo struct {
     target    ldapi.Target
@@ -297,7 +302,7 @@ func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) {
                 "values": interface{}(target.target.Values),
                 "variationId": interface{}(target.variation.Id),
             })
-            fmt.Printf("  Adding instructions to migrate individual user targets to context kind '%v'.\n", schema[keyAttribute].Kind)
+            fmt.Printf("  Adding instructions to replace individual user targets with individual '%v' targets.\n", schema[keyAttribute].Kind)
         } else {
             fmt.Printf("  Skipping individual user targets because no '%v' mapping was provided.\n", keyAttribute)
         }
@@ -357,18 +362,20 @@ func toInstructionClauses(clauses []ldapi.Clause) ([]map[string]interface{}, []s
     for _, clause := range clauses {
         mapping, isMapped := schema[clause.Attribute]
 
-        if isMapped {
-            toAdd = append(toAdd, map[string]interface{}{
-                "attribute": interface{}(mapping.Attribute),
-                "contextKind": interface{}(mapping.Kind),
-                "negate": interface{}(clause.Negate),
-                "op": interface{}(clause.Op),
-                "values": interface{}(clause.Values),
-            })
-            toRemove = append(toRemove, *clause.Id)
-            fmt.Printf("  Adding instructions to migrate a rule clause for user attribute '%v' to context kind '%v' and attribute '%v'.\n", clause.Attribute, mapping.Kind, mapping.Attribute)
-        } else {
-            fmt.Printf("  Skipping targeting rule clause for user attribute '%v' because no mapping was provided.\n", clause.Attribute)
+        if !contains(attributesToIgnore, clause.Attribute) {
+            if isMapped {
+                toAdd = append(toAdd, map[string]interface{}{
+                    "attribute": interface{}(mapping.Attribute),
+                    "contextKind": interface{}(mapping.Kind),
+                    "negate": interface{}(clause.Negate),
+                    "op": interface{}(clause.Op),
+                    "values": interface{}(clause.Values),
+                })
+                toRemove = append(toRemove, *clause.Id)
+                fmt.Printf("  Adding instructions to replace a rule clause for user attribute '%v' with a rule clause for '%v' attribute '%v'.\n", clause.Attribute, mapping.Kind, mapping.Attribute)
+            } else {
+                fmt.Printf("  Skipping targeting rule clause for user attribute '%v' because no mapping was provided.\n", clause.Attribute)
+            }
         }
     }
 
