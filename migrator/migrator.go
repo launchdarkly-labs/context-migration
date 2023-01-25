@@ -379,6 +379,10 @@ func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) {
 }
 
 func handleRollout(flag ldapi.FeatureFlag, rollout *ldapi.Rollout, ruleId *string) *map[string]interface{} {
+    if rollout == nil {
+        return nil
+    }
+
     rolloutType := "a rule"
     instructionKind := "updateRuleVariationOrRollout"
     if ruleId == nil {
