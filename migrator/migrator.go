@@ -56,9 +56,12 @@ type member struct {
 type flagDetails struct {
     targetUserRefs     []targetInfo
     ruleUserRefs       []ruleInfo
+    fallthroughRollout *ldapi.Rollout
     guardrailsViolated bool
     maintainerTeamKey  string
     maintainerMember   member
+    maintainerStr      string
+    maintainerTypeStr  string
 }
 
 type attributeSchema struct {
@@ -215,7 +218,7 @@ func Migrate() {
         if isFlagTargetingUsers(details) && !details.guardrailsViolated && len(schema) > 0 {
 			prepareApproval(flag, details)
             if migrate {
-                safeToMigrateBonusText = " Approval(s) have been submitted to flag maintainers for review."
+                safeToMigrateBonusText = " Approval(s) have been submitted to the flag maintainers for review."
             }
 		}
     }
@@ -228,7 +231,7 @@ func Migrate() {
 }
 
 func isFlagTargetingUsers(details flagDetails) bool {
-    return len(details.targetUserRefs) > 0 || len(details.ruleUserRefs) > 0
+    return len(details.targetUserRefs) > 0 || len(details.ruleUserRefs) > 0 || details.fallthroughRollout != nil
 }
 
 func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
@@ -254,6 +257,13 @@ func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
         }
     }
 
+    if flagConfig.Fallthrough != nil && flagConfig.Fallthrough.Rollout != nil {
+        rollout := flagConfig.Fallthrough.Rollout
+        if *rollout.ContextKind == userKind {
+            details.fallthroughRollout = rollout
+        }
+    }
+
     if isFlagTargetingUsers(details) {
         maintainerTeamKey, maintainerMemberId, maintainerMemberEmail := getMaintainer(flag)
         details.maintainerTeamKey = maintainerTeamKey
@@ -263,19 +273,19 @@ func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
         if details.guardrailsViolated {
             fmt.Printf("Flag '%v' is not safe to be migrated because of the specified guardrails.\n", flag.Key)
         } else {
-            maintainerType := "undefined"
-            maintainer := "n/a"
+            details.maintainerTypeStr = "undefined"
+            details.maintainerStr = "n/a"
             if details.maintainerMember.email != "" {
-                maintainerType = "member"
-                maintainer = details.maintainerMember.email
+                details.maintainerTypeStr = "member"
+                details.maintainerStr = details.maintainerMember.email
             } else if details.maintainerTeamKey != "" {
-                maintainerType = "team"
-                maintainer = details.maintainerTeamKey
+                details.maintainerTypeStr = "team"
+                details.maintainerStr = details.maintainerTeamKey
             } else if backupMaintainer != ""{
-                maintainerType = "backup"
-                maintainer = backupMaintainer
+                details.maintainerTypeStr = "backup"
+                details.maintainerStr = backupMaintainer
             }
-            fmt.Printf("Flag '%v' is safe to be migrated by the %v maintainer (%v).\n", flag.Key, maintainerType, maintainer)
+            fmt.Printf("Flag '%v' is safe to be migrated by the %v maintainer (%v).\n", flag.Key, details.maintainerTypeStr, details.maintainerStr)
         }
     }
 
@@ -325,8 +335,29 @@ func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) {
         }
     }
 
-    // Add instructions to migrate percent rollouts
-    // TODO
+    // Add instructions to migrate fallthrough rollouts
+    if details.fallthroughRollout != nil {
+        rollout := *details.fallthroughRollout
+        
+        attribute := keyAttribute
+        if rollout.BucketBy != nil {
+            attribute = *rollout.BucketBy
+        }
+        mapping, isMapped := schema[attribute]
+
+        if isMapped {
+            instructions = append(instructions, map[string]interface{}{
+                "kind": interface{}("updateFallthroughVariationOrRollout"),
+                "rolloutContextKind": interface{}(mapping.Kind),
+                "rolloutBucketBy": interface{}(mapping.Attribute),
+                "rolloutWeights": toRolloutWeights(flag, rollout.Variations),
+            })
+
+            fmt.Printf("  Adding an instruction to replace the fallthrough rollout for user attribute '%v' with a fallthrough rollout for '%v' attribute '%v'.\n", attribute, mapping.Kind, mapping.Attribute)
+        } else {
+            fmt.Printf("  Skipping the fallthrough rollout for user attribute '%v' because no mapping was provided.\n", attribute)
+        }
+    }
 
     if migrate {
         if len(instructions) > 0 {
@@ -347,10 +378,10 @@ func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) {
                 fmt.Fprintf(os.Stderr, "Error when calling `FeatureFlagsBetaApi.GetDependentFlagsByEnv``: %v\n", err)
                 fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
             } else {
-                fmt.Printf("  Approval request submitted for flag '%v'!\n", flag.Key)
+                fmt.Printf("  An approval request has been submitted to %v maintainer '%v' for flag '%v'!\n", details.maintainerTypeStr, details.maintainerStr, flag.Key)
             }
         } else {
-            fmt.Printf("  Skipping approval for flag '%v' because no mappings were provided.\n", flag.Key)
+            fmt.Printf("  Skipping the approval for flag '%v' because no mappings were provided.\n", flag.Key)
         }
     }
 }
@@ -374,12 +405,21 @@ func toInstructionClauses(clauses []ldapi.Clause) ([]map[string]interface{}, []s
                 toRemove = append(toRemove, *clause.Id)
                 fmt.Printf("  Adding instructions to replace a rule clause for user attribute '%v' with a rule clause for '%v' attribute '%v'.\n", clause.Attribute, mapping.Kind, mapping.Attribute)
             } else {
-                fmt.Printf("  Skipping targeting rule clause for user attribute '%v' because no mapping was provided.\n", clause.Attribute)
+                fmt.Printf("  Skipping a targeting rule clause for user attribute '%v' because no mapping was provided.\n", clause.Attribute)
             }
         }
     }
 
     return toAdd, toRemove
+}
+
+func toRolloutWeights(flag ldapi.FeatureFlag, weights []ldapi.WeightedVariation) map[string]int32 {
+    wvs := map[string]int32{}
+
+    for _, wv := range weights {
+        wvs[*flag.Variations[wv.Variation].Id] = wv.Weight
+    }
+    return wvs
 }
 
 func getMaintainer(flag ldapi.FeatureFlag) (string, string, string) {
