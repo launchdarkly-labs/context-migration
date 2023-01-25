@@ -499,13 +499,16 @@ func guardrailCodeRefs(flag ldapi.FeatureFlag) (bool) {
         fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
     }
 
-    for _, stat := range stats.Flags[flag.Key] {
+    flagStats := stats.Flags[flag.Key]
+    for _, stat := range flagStats {
         if !contains(repos, stat.Name) {
             return true
         }
     }
 
-    return false
+    // If we've reached this point, the script argument denotes that at least one repository is "safe".
+    // Let's mark repositories with no code references as "unsafe" because we don't know whether or not they're safe.
+    return len(flagStats) == 0
 }
 
 func contains(s []string, str string) bool {
