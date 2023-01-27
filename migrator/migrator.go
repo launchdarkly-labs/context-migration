@@ -33,9 +33,9 @@ const defaultProject = "default"
 const defaultEnv = "production"
 const defaultHost = "https://app.launchdarkly.com"
 var attributesToIgnore = []string{
-    "segmentMatch",     // TODO currently lacking segment and segment operator support
-    "not-segmentMatch", // TODO currently lacking segment and segment operator support
-    "kind",             // This attribute is new and fine and doesn't need to be migrated
+    "segmentMatch",     // Segments will be handled separate from flags, and this doesn't need to be migrated
+    "not-segmentMatch", // Segments will be handled separate from flags, and this doesn't need to be migrated
+    "kind",             // This attribute is new and doesn't need to be migrated
 }
 
 type targetInfo struct {
