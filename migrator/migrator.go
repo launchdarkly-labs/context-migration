@@ -202,6 +202,7 @@ func Migrate() {
     cntMigrateReady := 0
     cntGuardrail := 0
     cntNotNeeded := 0
+    cntInstAdded := 0
 
     safeToMigrateBonusText := ""
 
@@ -217,7 +218,7 @@ func Migrate() {
         }
 
         if isFlagTargetingUsers(details) && !details.guardrailsViolated && len(schema) > 0 {
-			prepareApproval(flag, details)
+			cntInstAdded += prepareApproval(flag, details)
             if migrate {
                 safeToMigrateBonusText = " Approval(s) have been submitted to the flag maintainers for review."
             }
@@ -229,6 +230,8 @@ func Migrate() {
     fmt.Printf(" - %v flag(s) contain user targeting and are safe to migrate.%v\n", cntMigrateReady, safeToMigrateBonusText)
     fmt.Printf(" - %v flag(s) aren't safe to migrate per the specified guardrails.\n", cntGuardrail)
     fmt.Printf(" - %v flag(s) do not need to be migrated.\n", cntNotNeeded)
+    fmt.Println()
+    fmt.Printf("This migration script automated %v change(s) across %v flag(s).\n", cntInstAdded, cntMigrateReady)
 }
 
 func isFlagTargetingUsers(details flagDetails) bool {
@@ -293,7 +296,7 @@ func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
     return details
 }
 
-func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) {
+func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) int {
     instructions := []map[string]interface{}{}
 	
     // Add instructions to migrate individual targets
@@ -376,6 +379,8 @@ func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) {
             fmt.Printf("  Skipping the approval for flag '%v' because no mappings were provided.\n", flag.Key)
         }
     }
+
+    return len(instructions)
 }
 
 func handleRollout(flag ldapi.FeatureFlag, rollout *ldapi.Rollout, ruleId *string) *map[string]interface{} {
