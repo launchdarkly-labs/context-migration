@@ -482,6 +482,11 @@ func checkGuardrails(flag ldapi.FeatureFlag) (bool) {
 }
 
 func guardrailPrereq(flag ldapi.FeatureFlag) (bool) {
+    if len(repos) == 0 {
+        // skip the guardrail check because all flags in this environment are deemed to be safe
+        return false
+    }
+
     deps, r, err := client.FeatureFlagsBetaApi.GetDependentFlagsByEnv(ctx, projectKey, envKey, flag.Key).Execute()
     if err != nil {
         fmt.Fprintf(os.Stderr, "Error when calling `FeatureFlagsBetaApi.GetDependentFlagsByEnv``: %v\n", err)
