@@ -28,7 +28,7 @@ If one or more codebases in your environment aren't ready for migration, be sure
 
 ### One-time setup
 
-Copy `.env.template` to `.env` and specify an API key. You can get one from the LaunchDarkly web app on the Authorization page (`/settings/authorization`). The API key should minimally have reader access to your project and environment (if running a dry-run) or sufficient access to submit approval requests to your project and environment (if running a migration).
+Copy `.env.template` to `.env` and specify an API key. You can get one from the LaunchDarkly web app on the Authorization page (`<LD_HOST>/settings/authorization` such as https://app.launchdarkly.com/settings/authorization). The API key should minimally have reader access to your project and environment (if running a dry-run) or sufficient access to submit approval requests to your project and environment (if running a migration).
 
 Load your env file: `source .env`
 
