@@ -173,6 +173,8 @@ func prepareSchema() {
 		return
 	}
 
+	// Read the schema file provided by the arguments
+
 	file, err := ioutil.ReadFile(schemaFile)
 
 	if err != nil {
@@ -188,6 +190,8 @@ func prepareSchema() {
 		os.Exit(4)
 	}
 
+	// Print the schema
+
 	fmt.Println("Using the following schema mappings:")
 	for userAttribute, newAttribute := range schema {
 		fmt.Printf("  %s: %s\n", userAttribute, newAttribute)
@@ -197,6 +201,7 @@ func prepareSchema() {
 }
 
 func Migrate() {
+	// Get all feature flags for this project and environment
 	flags, r, err := client.FeatureFlagsApi.GetFeatureFlags(ctx, projectKey).Env(envKey).Summary(false).Execute()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error when calling `FeatureFlagsApi.GetFeatureFlags``: %v\n", err)
@@ -212,6 +217,7 @@ func Migrate() {
 
 	safeToMigrateBonusText := ""
 
+	// For each flag, determine if it needs to be migrated and if it is safe to do so.
 	for _, flag := range flags.Items {
 		details := inspectFlag(flag)
 
@@ -224,6 +230,7 @@ func Migrate() {
 		}
 
 		if isFlagTargetingUsers(details) && !details.guardrailsViolated && len(schema) > 0 {
+			// Prepare an approval for migrating this flag
 			numInstAdded += prepareApproval(flag, details)
 			if migrate {
 				safeToMigrateBonusText = " Approval(s) have been submitted to the flag maintainers for review."
@@ -240,6 +247,7 @@ func Migrate() {
 	fmt.Printf("This migration script automated %v change(s) across %v flag(s).\n", numInstAdded, numMigrateReady)
 }
 
+// Returns true if the flag targets users anywhere in the flag configuration
 func isFlagTargetingUsers(details flagDetails) bool {
 	return len(details.targetUserRefs) > 0 || len(details.ruleUserRefs) > 0 || details.fallthroughRollout != nil
 }
@@ -248,12 +256,14 @@ func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
 	flagConfig := flag.Environments[envKey]
 	details := flagDetails{}
 
+	// For each individual targets list, identify any which are associated with the user context kind
 	for _, target := range flagConfig.Targets {
 		if *target.ContextKind == userKind {
 			details.targetUserRefs = append(details.targetUserRefs, targetInfo{target, flag.Variations[target.Variation]})
 		}
 	}
 
+	// For each targeting rule, identify any which are associated with the user context kind
 	for _, rule := range flagConfig.Rules {
 		clauses := make([]ldapi.Clause, 0)
 		for _, clause := range rule.Clauses {
@@ -267,6 +277,7 @@ func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
 		}
 	}
 
+	// For the flag's fallthrough, identify if it is associated with the user context kind
 	if flagConfig.Fallthrough != nil && flagConfig.Fallthrough.Rollout != nil {
 		rollout := flagConfig.Fallthrough.Rollout
 		if *rollout.ContextKind == userKind {
@@ -274,6 +285,7 @@ func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
 		}
 	}
 
+	// If the flag is targeting the user context kind anywhere above, print information about it
 	if isFlagTargetingUsers(details) {
 		maintainerTeamKey, maintainerMemberId, maintainerMemberEmail := getMaintainer(flag)
 		details.maintainerTeamKey = maintainerTeamKey
@@ -374,6 +386,7 @@ func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) int {
 				req.NotifyMemberIds = []string{backupMaintainer}
 			}
 
+			// POST the approval request to LaunchDarkly
 			_, r, err := client.ApprovalsApi.PostApprovalRequest(ctx, projectKey, flag.Key, envKey).CreateFlagConfigApprovalRequestRequest(req).Execute()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error when calling `FeatureFlagsBetaApi.GetDependentFlagsByEnv``: %v\n", err)
@@ -386,9 +399,11 @@ func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) int {
 		}
 	}
 
+	// Return the total number of instructions so that we can aggregate a total count
 	return len(instructions)
 }
 
+// Construct an instruction to migrate a rollout
 func handleRollout(flag ldapi.FeatureFlag, rollout *ldapi.Rollout, ruleId *string) *map[string]interface{} {
 	if rollout == nil {
 		return nil
@@ -427,6 +442,7 @@ func handleRollout(flag ldapi.FeatureFlag, rollout *ldapi.Rollout, ruleId *strin
 	}
 }
 
+// Construct instructions to migrate targeting rule clauses
 func toInstructionClauses(clauses []ldapi.Clause) ([]map[string]interface{}, []string) {
 	toAdd := []map[string]interface{}{}
 	toRemove := []string{}
@@ -454,6 +470,7 @@ func toInstructionClauses(clauses []ldapi.Clause) ([]map[string]interface{}, []s
 	return toAdd, toRemove
 }
 
+// Helper function to get the flag's variation rollout weights
 func toRolloutWeights(flag ldapi.FeatureFlag, weights []ldapi.WeightedVariation) map[string]int32 {
 	wvs := map[string]int32{}
 
@@ -463,6 +480,7 @@ func toRolloutWeights(flag ldapi.FeatureFlag, weights []ldapi.WeightedVariation)
 	return wvs
 }
 
+// Helper function to get information about the flag maintainer
 func getMaintainer(flag ldapi.FeatureFlag) (string, string, string) {
 	maintainerTeamKey := ""
 	maintainerMemberId := ""
@@ -478,6 +496,7 @@ func getMaintainer(flag ldapi.FeatureFlag) (string, string, string) {
 	return maintainerTeamKey, maintainerMemberId, maintainerMemberEmail
 }
 
+// Helper function to identify if a flag is unsafe to migrate
 func isUnsafeToMigrate(flag ldapi.FeatureFlag) bool {
 	// Each of these will be true if the corresponding guardrail has been violated.
 	// They need to all be false for it to be safe to migrate a flag.
