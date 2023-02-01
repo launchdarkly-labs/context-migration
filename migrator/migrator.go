@@ -243,8 +243,15 @@ func Migrate() {
 	fmt.Printf(" - %v flag(s) contain user targeting and are safe to migrate.%v\n", numMigrateReady, safeToMigrateBonusText)
 	fmt.Printf(" - %v flag(s) aren't safe to migrate per the specified guardrails.\n", numGuardrail)
 	fmt.Printf(" - %v flag(s) do not need to be migrated.\n", numNotNeeded)
-	fmt.Println()
-	fmt.Printf("This migration script automated %v change(s) across %v flag(s).\n", numInstAdded, numMigrateReady)
+
+	if len(schema) > 0 {
+		fmt.Println()
+		if migrate {
+			fmt.Printf("This migration script automated %v change(s) across %v flag(s).\n", numInstAdded, numMigrateReady)
+		} else {
+			fmt.Printf("This migration script would have automated %v change(s) across %v flag(s).\n", numInstAdded, numMigrateReady)
+		}
+	}
 }
 
 // Returns true if the flag targets users anywhere in the flag configuration
