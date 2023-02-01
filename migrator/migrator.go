@@ -27,11 +27,15 @@ var (
 	ctx              context.Context
 )
 
-const userKind = "user"
-const keyAttribute = "key"
-const defaultProject = "default"
-const defaultEnv = "production"
-const defaultHost = "https://app.launchdarkly.com"
+const (
+	userKind                      = "user"
+	keyAttribute                  = "key"
+	defaultProject                = "default"
+	defaultEnv                    = "production"
+	defaultHost                   = "https://app.launchdarkly.com"
+	updateRuleVarOrRollout        = "updateRuleVariationOrRollout"
+	updateFallthroughVarOrRollout = "updateFallthroughVariationOrRollout"
+)
 
 var attributesToIgnore = []string{
 	"segmentMatch",     // Segments will be handled separate from flags, and this doesn't need to be migrated
@@ -72,7 +76,7 @@ type attributeSchema struct {
 }
 
 func init() {
-	args()
+	parseArgs()
 	prepareSchema()
 
 	config := ldapi.NewConfiguration()
@@ -93,7 +97,7 @@ func init() {
 	ctx = context.WithValue(ctx, ldapi.ContextAPIKeys, auth)
 }
 
-func args() {
+func parseArgs() {
 	apiKey = os.Getenv("LD_API_KEY")
 	if apiKey == "" {
 		log.Fatal("Must supply LD_API_KEY")
@@ -151,7 +155,7 @@ func args() {
 		fmt.Printf("MIGRATE is provided: the script will run the migration!\n")
 	} else {
 		log.Fatal("MIGRATE is provided but SCHEMA_FILE is not. SCHEMA_FILE must also be provided to run the migration.")
-		os.Exit(4)
+		os.Exit(2)
 	}
 
 	backupMaintainer = os.Getenv("BACKUP_MAINTAINER")
@@ -173,7 +177,7 @@ func prepareSchema() {
 
 	if err != nil {
 		log.Fatal(err)
-		os.Exit(2)
+		os.Exit(3)
 	}
 
 	schema = make(map[string]attributeSchema)
@@ -181,7 +185,7 @@ func prepareSchema() {
 
 	if err != nil {
 		log.Fatal(err)
-		os.Exit(3)
+		os.Exit(4)
 	}
 
 	fmt.Println("Using the following schema mappings:")
@@ -197,13 +201,14 @@ func Migrate() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error when calling `FeatureFlagsApi.GetFeatureFlags``: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
+		os.Exit(5)
 	}
 	fmt.Printf("Inspecting flags for project '%v' and environment '%v'.\n", projectKey, envKey)
 
-	cntMigrateReady := 0
-	cntGuardrail := 0
-	cntNotNeeded := 0
-	cntInstAdded := 0
+	numMigrateReady := 0
+	numGuardrail := 0
+	numNotNeeded := 0
+	numInstAdded := 0
 
 	safeToMigrateBonusText := ""
 
@@ -211,15 +216,15 @@ func Migrate() {
 		details := inspectFlag(flag)
 
 		if details.guardrailsViolated {
-			cntGuardrail++
+			numGuardrail++
 		} else if isFlagTargetingUsers(details) {
-			cntMigrateReady++
+			numMigrateReady++
 		} else {
-			cntNotNeeded++
+			numNotNeeded++
 		}
 
 		if isFlagTargetingUsers(details) && !details.guardrailsViolated && len(schema) > 0 {
-			cntInstAdded += prepareApproval(flag, details)
+			numInstAdded += prepareApproval(flag, details)
 			if migrate {
 				safeToMigrateBonusText = " Approval(s) have been submitted to the flag maintainers for review."
 			}
@@ -228,11 +233,11 @@ func Migrate() {
 
 	fmt.Println()
 	fmt.Printf("%v flag(s) found.\n", len(flags.Items))
-	fmt.Printf(" - %v flag(s) contain user targeting and are safe to migrate.%v\n", cntMigrateReady, safeToMigrateBonusText)
-	fmt.Printf(" - %v flag(s) aren't safe to migrate per the specified guardrails.\n", cntGuardrail)
-	fmt.Printf(" - %v flag(s) do not need to be migrated.\n", cntNotNeeded)
+	fmt.Printf(" - %v flag(s) contain user targeting and are safe to migrate.%v\n", numMigrateReady, safeToMigrateBonusText)
+	fmt.Printf(" - %v flag(s) aren't safe to migrate per the specified guardrails.\n", numGuardrail)
+	fmt.Printf(" - %v flag(s) do not need to be migrated.\n", numNotNeeded)
 	fmt.Println()
-	fmt.Printf("This migration script automated %v change(s) across %v flag(s).\n", cntInstAdded, cntMigrateReady)
+	fmt.Printf("This migration script automated %v change(s) across %v flag(s).\n", numInstAdded, numMigrateReady)
 }
 
 func isFlagTargetingUsers(details flagDetails) bool {
@@ -273,7 +278,7 @@ func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
 		maintainerTeamKey, maintainerMemberId, maintainerMemberEmail := getMaintainer(flag)
 		details.maintainerTeamKey = maintainerTeamKey
 		details.maintainerMember = member{maintainerMemberEmail, maintainerMemberId}
-		details.guardrailsViolated = checkGuardrails(flag)
+		details.guardrailsViolated = isUnsafeToMigrate(flag)
 
 		if details.guardrailsViolated {
 			fmt.Printf("Flag '%v' is not safe to be migrated because of the specified guardrails.\n", flag.Key)
@@ -390,10 +395,10 @@ func handleRollout(flag ldapi.FeatureFlag, rollout *ldapi.Rollout, ruleId *strin
 	}
 
 	rolloutType := "a rule"
-	instructionKind := "updateRuleVariationOrRollout"
+	instructionKind := updateRuleVarOrRollout
 	if ruleId == nil {
 		rolloutType = "the fallthrough"
-		instructionKind = "updateFallthroughVariationOrRollout"
+		instructionKind = updateFallthroughVarOrRollout
 	}
 
 	attribute := keyAttribute
@@ -473,16 +478,16 @@ func getMaintainer(flag ldapi.FeatureFlag) (string, string, string) {
 	return maintainerTeamKey, maintainerMemberId, maintainerMemberEmail
 }
 
-func checkGuardrails(flag ldapi.FeatureFlag) bool {
+func isUnsafeToMigrate(flag ldapi.FeatureFlag) bool {
 	// Each of these will be true if the corresponding guardrail has been violated.
 	// They need to all be false for it to be safe to migrate a flag.
-	isPrereq := guardrailPrereq(flag)
-	isInUnsafeRepos := guardrailCodeRefs(flag)
+	isPrereq := hasDependentFlags(flag)
+	isInUnsafeRepos := referencedInUnsafeRepo(flag)
 
 	return isPrereq || isInUnsafeRepos
 }
 
-func guardrailPrereq(flag ldapi.FeatureFlag) bool {
+func hasDependentFlags(flag ldapi.FeatureFlag) bool {
 	if len(repos) == 0 {
 		// skip the guardrail check because all flags in this environment are deemed to be safe
 		return false
@@ -497,7 +502,7 @@ func guardrailPrereq(flag ldapi.FeatureFlag) bool {
 	return len(deps.Items) > 0
 }
 
-func guardrailCodeRefs(flag ldapi.FeatureFlag) bool {
+func referencedInUnsafeRepo(flag ldapi.FeatureFlag) bool {
 	if len(repos) == 0 {
 		// skip the guardrail check because all repos are "ready"
 		return false
