@@ -12,6 +12,8 @@ As this script executes on a per-environment basis, the script needs to safely i
 
 If one or more codebases in your environment aren't ready for migration, be sure to specify the `REPOSITORIES` argument in conjunction with our [code references feature](https://docs.launchdarkly.com/home/code/code-references) so that this script distinguishes between safe and unsafe flags. Based on this argument, the script only migrates flags which are solely located in the "safe" codebases. Similarly, if the `REPOSITORIES` argument is provided, the script omits all prerequisites just in case any of them are shared among multiple codebases. These "guardrails" intend to protect your LaunchDarkly environments from being migrated too early.
 
+Additionally, flags shouldn't be updated while being used in an actively running experiment. The script identifies these flags and marks them as unsafe to migrate.
+
 **Identifying how your user schema maps to your context schema**: Every customer differs in how they structure their attributes. The script requires customers to provide a mapping from their existing user schema to their newer context schema. The newer context schema could describe a single non-user context or it could describe a multi-context. Omitting user attributes from your schema results in them being omitted from the migration. See the "schema file format" section below for more information.
 
 **Individual targets:** Individual targets are groupings of a variation, a context kind, and a list of context keys. For each flag that's safe to migrate, the script identifies individual targets associated with the user context kind and replaces them with individual targets for the mapped context kind and attribute.

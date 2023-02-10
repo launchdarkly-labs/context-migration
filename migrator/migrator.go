@@ -86,7 +86,7 @@ func init() {
 			URL: host,
 		},
 	}
-	config.AddDefaultHeader("LD-API-Version", "beta") //needed to determine prereqs
+	config.AddDefaultHeader("LD-API-Version", "beta") //needed to determine prereqs and check experiment status
 	client = ldapi.NewAPIClient(config)
 
 	auth := make(map[string]ldapi.APIKey)
@@ -521,9 +521,10 @@ func isUnsafeToMigrate(flag ldapi.FeatureFlag) bool {
 	// Each of these will be true if the corresponding guardrail has been violated.
 	// They need to all be false for it to be safe to migrate a flag.
 	isPrereq := hasDependentFlags(flag)
-	isInUnsafeRepos := referencedInUnsafeRepo(flag)
+	isInUnsafeRepos := isReferencedInUnsafeRepo(flag)
+	isInRunningExperiment := isReferencedInRunningExperiment(flag)
 
-	return isPrereq || isInUnsafeRepos
+	return isPrereq || isInUnsafeRepos || isInRunningExperiment
 }
 
 func hasDependentFlags(flag ldapi.FeatureFlag) bool {
@@ -541,7 +542,7 @@ func hasDependentFlags(flag ldapi.FeatureFlag) bool {
 	return len(deps.Items) > 0
 }
 
-func referencedInUnsafeRepo(flag ldapi.FeatureFlag) bool {
+func isReferencedInUnsafeRepo(flag ldapi.FeatureFlag) bool {
 	if len(repos) == 0 {
 		// skip the guardrail check because all repos are "ready"
 		return false
@@ -564,6 +565,18 @@ func referencedInUnsafeRepo(flag ldapi.FeatureFlag) bool {
 	// If we've reached this point, the script argument denotes that at least one repository is "safe".
 	// Let's mark repositories with no code references as "unsafe" because we don't know whether or not they're safe.
 	return len(flagStats) == 0
+}
+
+func isReferencedInRunningExperiment(flag ldapi.FeatureFlag) bool {
+	exps, r, err := client.ExperimentsBetaApi.GetExperiments(ctx, projectKey, envKey).Filter("flagKey:" + flag.Key + ",status:running").Execute()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Experimentation is an opt-in feature. Your LaunchDarkly account must have Experimentation enabled to use this guardrail.\n")
+		fmt.Fprintf(os.Stderr, "Error when calling `ExperimentsBetaApi.GetExperiments``: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
+	}
+
+	// Return true if this flag is used in an actively running experiment
+	return exps != nil && exps.TotalCount != nil && *exps.TotalCount > 0
 }
 
 func contains(s []string, str string) bool {
