@@ -569,8 +569,13 @@ func isReferencedInUnsafeRepo(flag ldapi.FeatureFlag) bool {
 
 func isReferencedInRunningExperiment(flag ldapi.FeatureFlag) bool {
 	exps, r, err := client.ExperimentsBetaApi.GetExperiments(ctx, projectKey, envKey).Filter("flagKey:" + flag.Key + ",status:running").Execute()
+
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Experimentation is an opt-in feature. Your LaunchDarkly account must have Experimentation enabled to use this guardrail.\n")
+		if r.StatusCode == 403 {
+			// The customer doesn't pay for Experimentation. Allow the migration to proceed.
+			return false
+		}
+
 		fmt.Fprintf(os.Stderr, "Error when calling `ExperimentsBetaApi.GetExperiments``: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
 	}
