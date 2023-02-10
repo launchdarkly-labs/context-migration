@@ -14,17 +14,18 @@ import (
 )
 
 var (
-	apiKey           string
-	projectKey       string
-	envKey           string
-	host             string
-	backupMaintainer string
-	schemaFile       string
-	repos            []string
-	migrate          bool
-	schema           map[string]attributeSchema
-	client           *ldapi.APIClient
-	ctx              context.Context
+	apiKey                 string
+	projectKey             string
+	envKey                 string
+	host                   string
+	backupMaintainerMember string
+	backupMaintainerTeam   string
+	schemaFile             string
+	repos                  []string
+	migrate                bool
+	schema                 map[string]attributeSchema
+	client                 *ldapi.APIClient
+	ctx                    context.Context
 )
 
 const (
@@ -158,11 +159,18 @@ func parseArgs() {
 		os.Exit(2)
 	}
 
-	backupMaintainer = os.Getenv("BACKUP_MAINTAINER")
-	if backupMaintainer == "" {
-		fmt.Printf("BACKUP_MAINTAINER is unspecified: using default behavior of having no backup maintainer\n")
+	backupMaintainerTeam = os.Getenv("BACKUP_MAINTAINER_TEAM")
+	if backupMaintainerTeam == "" {
+		fmt.Printf("BACKUP_MAINTAINER_TEAM is unspecified: checking to see if BACKUP_MAINTAINER_MEMBER is specified\n")
+
+		backupMaintainerMember = os.Getenv("BACKUP_MAINTAINER_MEMBER")
+		if backupMaintainerMember == "" {
+			fmt.Printf("BACKUP_MAINTAINER_MEMBER is unspecified: using default behavior of having no backup maintainer\n")
+		} else {
+			fmt.Printf("BACKUP_MAINTAINER_MEMBER is provided: %v\n", backupMaintainerMember)
+		}
 	} else {
-		fmt.Printf("BACKUP_MAINTAINER is provided: %v\n", backupMaintainer)
+		fmt.Printf("BACKUP_MAINTAINER_TEAM is provided: %v\n", backupMaintainerTeam)
 	}
 
 	fmt.Println()
@@ -310,9 +318,12 @@ func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
 			} else if details.maintainerTeamKey != "" {
 				details.maintainerTypeStr = "team"
 				details.maintainerStr = details.maintainerTeamKey
-			} else if backupMaintainer != "" {
-				details.maintainerTypeStr = "backup"
-				details.maintainerStr = backupMaintainer
+			} else if backupMaintainerMember != "" {
+				details.maintainerTypeStr = "backup member"
+				details.maintainerStr = backupMaintainerMember
+			} else if backupMaintainerTeam != "" {
+				details.maintainerTypeStr = "backup team"
+				details.maintainerStr = backupMaintainerTeam
 			}
 			fmt.Printf("Flag '%v' is safe to be migrated by the %v maintainer (%v).\n", flag.Key, details.maintainerTypeStr, details.maintainerStr)
 		}
@@ -389,8 +400,10 @@ func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) int {
 				req.NotifyMemberIds = []string{details.maintainerMember.id}
 			} else if details.maintainerTeamKey != "" {
 				req.NotifyTeamKeys = []string{details.maintainerTeamKey}
-			} else if backupMaintainer != "" {
-				req.NotifyMemberIds = []string{backupMaintainer}
+			} else if backupMaintainerMember != "" {
+				req.NotifyMemberIds = []string{backupMaintainerMember}
+			} else if backupMaintainerTeam != "" {
+				req.NotifyTeamKeys = []string{backupMaintainerTeam}
 			}
 
 			// POST the approval request to LaunchDarkly

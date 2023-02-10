@@ -54,7 +54,7 @@ Run: `LD_API_KEY=$LD_API_KEY SCHEMA_FILE=schema.yml MIGRATE=true ./main`
 
 This command runs the script following the migration methodology described above, concluding in submitting approvals to flag maintainers.
 
-You can add the `BACKUP_MAINTAINER` argument to ensure that all approvals have at least one person or team notified. Consider specifying this argument with your own member ID so that you can get notified of all approvals which need to be manually distributed across your team. See below for more information about this argument.
+You can add the `BACKUP_MAINTAINER_MEMBER` or `BACKUP_MAINTAINER_TEAM` arguments to ensure that all approvals have at least one person or team notified. Consider specifying these arguments with your own member ID or your own team's key so that you can get notified of all approvals which need to be manually distributed across your team. See below for more information about this argument.
 
 ## Optional arguments
 
@@ -65,7 +65,8 @@ You may add the following arguments to customize your results.
 * `ENVIRONMENT_KEY`: The LaunchDarkly environment key. Defaults to `production`.
 * `SCHEMA_FILE`: The relative path to a YAML file containing the mapping from your user schema to your custom contexts schemas. Defaults to no file.
 * `MIGRATE`: When specified, the script creates approvals for all flags which are safe to migrate. When unspecified, the script instead runs an informative dry-run. The value can be set to anything such as `true` - so long as it is not blank or omitted.
-* `BACKUP_MAINTAINER`: The member id of the user who should be notified about approvals for flags where no maintainer is set. Defaults to none. You can get the member id by extracting it from the URL on the manage member page.
+* `BACKUP_MAINTAINER_MEMBER`: The member id of the user who should be notified about approvals for flags where no maintainer is set. Defaults to none. You can get the member id by extracting it from the URL on the manage member page.
+* `BACKUP_MAINTAINER_TEAM`: The key of the team who should be notified about approvals for flags where no maintainer is set. Defaults to none. You can get the team key from the Teams list (`<LD_HOST>/settings/teams` such as https://app.launchdarkly.com/settings/teams). If both this and `BACKUP_MAINTAINER_MEMBER` are provided, `BACKUP_MAINTAINER_TEAM` takes precedence.
 * `REPOSITORIES`: A comma-separated list of repository names (as used by [Code References](https://docs.launchdarkly.com/home/code/code-references)) to be used as a guardrail in the script. Repositories named in this argument are considered ready for the migration and omitted repositories are considered not ready; additionally, when provided, all prerequisites will be deemed "unsafe" in case they're used across both safe and unsafe repositories. If unspecified, the script defaults to behavior where all repositories are considered ready and as a result all flags in the environment are considered ready.
 
 ## Schema file format
