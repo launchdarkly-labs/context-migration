@@ -1,4 +1,4 @@
-module github.com/launchdarkly/context-migration
+module github.com/launchdarkly-labs/context-migration
 
 go 1.19
 
