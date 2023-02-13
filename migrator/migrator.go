@@ -106,20 +106,20 @@ func parseArgs() {
 		os.Exit(1)
 	}
 
-	projectKey = os.Getenv("PROJECT_KEY")
+	projectKey = os.Getenv("LD_PROJECT")
 	if projectKey == "" {
 		projectKey = defaultProject
-		fmt.Printf("PROJECT_KEY is unspecified: using default value of %v\n", defaultProject)
+		fmt.Printf("LD_PROJECT is unspecified: using default value of %v\n", defaultProject)
 	} else {
-		fmt.Printf("PROJECT_KEY is provided: %v\n", projectKey)
+		fmt.Printf("LD_PROJECT is provided: %v\n", projectKey)
 	}
 
-	envKey = os.Getenv("ENVIRONMENT_KEY")
+	envKey = os.Getenv("LD_ENVIRONMENT")
 	if envKey == "" {
 		envKey = defaultEnv
-		fmt.Printf("ENVIRONMENT_KEY is unspecified: using default value of %v\n", defaultEnv)
+		fmt.Printf("LD_ENVIRONMENT is unspecified: using default value of %v\n", defaultEnv)
 	} else {
-		fmt.Printf("ENVIRONMENT_KEY is provided: %v\n", envKey)
+		fmt.Printf("LD_ENVIRONMENT is provided: %v\n", envKey)
 	}
 
 	host = os.Getenv("LD_HOST")
@@ -140,11 +140,11 @@ func parseArgs() {
 		}
 	}
 
-	flagsArg := os.Getenv("FLAGS")
+	flagsArg := os.Getenv("LD_FLAGS")
 	if flagsArg == "" {
-		fmt.Printf("FLAGS is unspecified: using default behavior where all flags are considered\n")
+		fmt.Printf("LD_FLAGS is unspecified: using default behavior where all flags are considered\n")
 	} else {
-		fmt.Printf("FLAGS is provided: %v\n", flagsArg)
+		fmt.Printf("LD_FLAGS is provided: %v\n", flagsArg)
 		for _, flagKey := range strings.Split(flagsArg, ",") {
 			flagKeys = append(flagKeys, flagKey)
 		}
