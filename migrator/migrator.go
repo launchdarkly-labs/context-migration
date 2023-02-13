@@ -22,6 +22,7 @@ var (
 	backupMaintainerTeam   string
 	schemaFile             string
 	repos                  []string
+	flagKeys               []string
 	migrate                bool
 	schema                 map[string]attributeSchema
 	client                 *ldapi.APIClient
@@ -129,14 +130,23 @@ func parseArgs() {
 		fmt.Printf("LD_HOST is provided: %v\n", host)
 	}
 
-	repoArg := os.Getenv("REPOSITORIES")
-	if repoArg == "" {
+	reposArg := os.Getenv("REPOSITORIES")
+	if reposArg == "" {
 		fmt.Printf("REPOSITORIES is unspecified: using default behavior where all repositories are ready\n")
 	} else {
-		fmt.Printf("REPOSITORIES is provided: %v\n", repoArg)
-		repoNames := strings.Split(repoArg, ",")
-		for _, repo := range repoNames {
+		fmt.Printf("REPOSITORIES is provided: %v\n", reposArg)
+		for _, repo := range strings.Split(reposArg, ",") {
 			repos = append(repos, repo)
+		}
+	}
+
+	flagsArg := os.Getenv("FLAGS")
+	if flagsArg == "" {
+		fmt.Printf("FLAGS is unspecified: using default behavior where all flags are considered\n")
+	} else {
+		fmt.Printf("FLAGS is provided: %v\n", flagsArg)
+		for _, flagKey := range strings.Split(flagsArg, ",") {
+			flagKeys = append(flagKeys, flagKey)
 		}
 	}
 
@@ -218,6 +228,7 @@ func Migrate() {
 	}
 	fmt.Printf("Inspecting flags for project '%v' and environment '%v'.\n", projectKey, envKey)
 
+	numFound := 0
 	numMigrateReady := 0
 	numGuardrail := 0
 	numNotNeeded := 0
@@ -227,27 +238,30 @@ func Migrate() {
 
 	// For each flag, determine if it needs to be migrated and if it is safe to do so.
 	for _, flag := range flags.Items {
-		details := inspectFlag(flag)
+		if len(flagKeys) == 0 || contains(flagKeys, flag.Key) {
+			numFound++
+			details := inspectFlag(flag)
 
-		if len(details.guardrailMessages) > 0 {
-			numGuardrail++
-		} else if isFlagTargetingUsers(details) {
-			numMigrateReady++
-		} else {
-			numNotNeeded++
-		}
+			if len(details.guardrailMessages) > 0 {
+				numGuardrail++
+			} else if isFlagTargetingUsers(details) {
+				numMigrateReady++
+			} else {
+				numNotNeeded++
+			}
 
-		if isFlagTargetingUsers(details) && len(details.guardrailMessages) == 0 && len(schema) > 0 {
-			// Prepare an approval for migrating this flag
-			numInstAdded += prepareApproval(flag, details)
-			if migrate {
-				safeToMigrateBonusText = " Approval(s) have been submitted to the flag maintainers for review."
+			if isFlagTargetingUsers(details) && len(details.guardrailMessages) == 0 && len(schema) > 0 {
+				// Prepare an approval for migrating this flag
+				numInstAdded += prepareApproval(flag, details)
+				if migrate {
+					safeToMigrateBonusText = " Approval(s) have been submitted to the flag maintainers for review."
+				}
 			}
 		}
 	}
 
 	fmt.Println()
-	fmt.Printf("%v flag(s) found.\n", len(flags.Items))
+	fmt.Printf("%v flag(s) found.\n", numFound)
 	fmt.Printf(" - %v flag(s) contain user targeting and are safe to migrate.%v\n", numMigrateReady, safeToMigrateBonusText)
 	fmt.Printf(" - %v flag(s) aren't safe to migrate per the specified guardrails.\n", numGuardrail)
 	fmt.Printf(" - %v flag(s) do not need to be migrated.\n", numNotNeeded)
