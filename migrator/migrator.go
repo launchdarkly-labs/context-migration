@@ -425,6 +425,11 @@ func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) int {
 
 			// POST the approval request to LaunchDarkly
 			_, r, err := client.ApprovalsApi.PostApprovalRequest(ctx, projectKey, flag.Key, envKey).CreateFlagConfigApprovalRequestRequest(req).Execute()
+			if r.StatusCode == 403 {
+				// The customer doesn't have access to approvals.
+				fmt.Fprint(os.Stderr, "Failed to create an approval. Either your API key lacks sufficient permission or your LaunchDarkly plan doesn't include access to approvals. Update your API key or use the script in dry-run mode.\n")
+				os.Exit(6)
+			}
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error when calling `FeatureFlagsBetaApi.GetDependentFlagsByEnv``: %v\n", err)
 				fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
@@ -595,12 +600,11 @@ func isReferencedInUnsafeRepo(flag ldapi.FeatureFlag) bool {
 func isReferencedInRunningExperiment(flag ldapi.FeatureFlag) bool {
 	exps, r, err := client.ExperimentsBetaApi.GetExperiments(ctx, projectKey, envKey).Filter("flagKey:" + flag.Key + ",status:running").Execute()
 
+	if r.StatusCode == 403 {
+		// The customer doesn't pay for Experimentation. Allow the migration to proceed.
+		return false
+	}
 	if err != nil {
-		if r.StatusCode == 403 {
-			// The customer doesn't pay for Experimentation. Allow the migration to proceed.
-			return false
-		}
-
 		fmt.Fprintf(os.Stderr, "Error when calling `ExperimentsBetaApi.GetExperiments``: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
 	}
