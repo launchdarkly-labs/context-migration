@@ -64,7 +64,7 @@ type flagDetails struct {
 	targetUserRefs     []targetInfo
 	ruleUserRefs       []ruleInfo
 	fallthroughRollout *ldapi.Rollout
-	guardrailsViolated bool
+	guardrailMessages  []string
 	maintainerTeamKey  string
 	maintainerMember   member
 	maintainerStr      string
@@ -155,7 +155,7 @@ func parseArgs() {
 		migrate = true
 		fmt.Printf("MIGRATE is provided: the script will run the migration!\n")
 	} else {
-		log.Fatal("MIGRATE is provided but SCHEMA_FILE is not. SCHEMA_FILE must also be provided to run the migration.")
+		log.Fatal("MIGRATE is provided but SCHEMA_FILE isn't. SCHEMA_FILE must also be provided to run the migration.")
 		os.Exit(2)
 	}
 
@@ -229,7 +229,7 @@ func Migrate() {
 	for _, flag := range flags.Items {
 		details := inspectFlag(flag)
 
-		if details.guardrailsViolated {
+		if len(details.guardrailMessages) > 0 {
 			numGuardrail++
 		} else if isFlagTargetingUsers(details) {
 			numMigrateReady++
@@ -237,7 +237,7 @@ func Migrate() {
 			numNotNeeded++
 		}
 
-		if isFlagTargetingUsers(details) && !details.guardrailsViolated && len(schema) > 0 {
+		if isFlagTargetingUsers(details) && len(details.guardrailMessages) == 0 && len(schema) > 0 {
 			// Prepare an approval for migrating this flag
 			numInstAdded += prepareApproval(flag, details)
 			if migrate {
@@ -305,10 +305,13 @@ func inspectFlag(flag ldapi.FeatureFlag) flagDetails {
 		maintainerTeamKey, maintainerMemberId, maintainerMemberEmail := getMaintainer(flag)
 		details.maintainerTeamKey = maintainerTeamKey
 		details.maintainerMember = member{maintainerMemberEmail, maintainerMemberId}
-		details.guardrailsViolated = isUnsafeToMigrate(flag)
+		details.guardrailMessages = getPreconditionViolations(flag)
 
-		if details.guardrailsViolated {
-			fmt.Printf("Flag '%v' is not safe to be migrated because of the specified guardrails.\n", flag.Key)
+		if len(details.guardrailMessages) > 0 {
+			fmt.Printf("Flag '%v' isn't safe to be migrated because:\n", flag.Key)
+			for _, msg := range details.guardrailMessages {
+				fmt.Println(msg)
+			}
 		} else {
 			details.maintainerTypeStr = "undefined"
 			details.maintainerStr = "n/a"
@@ -516,15 +519,23 @@ func getMaintainer(flag ldapi.FeatureFlag) (string, string, string) {
 	return maintainerTeamKey, maintainerMemberId, maintainerMemberEmail
 }
 
-// Helper function to identify if a flag is unsafe to migrate
-func isUnsafeToMigrate(flag ldapi.FeatureFlag) bool {
+// Helper function to identify why a flag is/isn't safe to migrate
+func getPreconditionViolations(flag ldapi.FeatureFlag) []string {
+	violations := []string{}
+
 	// Each of these will be true if the corresponding guardrail has been violated.
 	// They need to all be false for it to be safe to migrate a flag.
-	isPrereq := hasDependentFlags(flag)
-	isInUnsafeRepos := isReferencedInUnsafeRepo(flag)
-	isInRunningExperiment := isReferencedInRunningExperiment(flag)
+	if hasDependentFlags(flag) {
+		violations = append(violations, "  The flag is a prerequisite of dependent flags.")
+	}
+	if isReferencedInUnsafeRepo(flag) {
+		violations = append(violations, "  The flag is referenced in one or more unsafe repositories.")
+	}
+	if isReferencedInRunningExperiment(flag) {
+		violations = append(violations, "  The flag is used in a running experiment.")
+	}
 
-	return isPrereq || isInUnsafeRepos || isInRunningExperiment
+	return violations
 }
 
 func hasDependentFlags(flag ldapi.FeatureFlag) bool {
