@@ -35,7 +35,7 @@ Additionally, don't migrate flags that you're using in running experiments. The 
 Here are the steps you must complete the first time you run the script:
 
 1. Navigate to the Authorization page in your LaunchDarkly UI at `<LD_HOST>/settings/authorization`. For example: https://app.launchdarkly.com/settings/authorization.
-2. Create an API key. If you want to test the script without changing anything, the API key you use should at least have reader access to your project and environment. If you want to execute the migration, the API key must have sufficient access to submit approval requests to your project and environment. To learn more, read the [product documentation](https://docs.launchdarkly.com/home/account-security/api-access-tokens).
+2. Create an API key. If you want to execute a dry-run, the API key you use should at least have reader access to your project and environment. If you want to execute the migration, the API key must have sufficient access to submit approval requests to your project and environment. To learn more, read the [product documentation](https://docs.launchdarkly.com/home/account-security/api-access-tokens).
 3. Copy `.env.template` to `.env` and specify the API key you created.
 4. Load your env file: `source .env`
 
