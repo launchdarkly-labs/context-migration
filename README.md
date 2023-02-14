@@ -14,7 +14,7 @@ The migration script runs on a per-environment basis, so it needs to correctly i
 
 If one or more codebases in your environment aren't ready for migration, specify the `REPOSITORIES` argument in conjunction with LaunchDarkly's code references feature. This lets the script distinguish between flags that are and aren't ready for migration. Based on this argument, the script only migrates flags that are solely located in the codebases that are ready to migrate. If you provide the `REPOSITORIES` argument, the script omits all prerequisites in case any of them are shared among multiple codebases. These guardrails should protect your LaunchDarkly flags from being migrated before they're ready. To learn more about using code references, read the [product documentation](https://docs.launchdarkly.com/home/code/code-references).
 
-Additionally, don't migrate flags that you're using in an active and running experiment. The script identifies these flags and marks them as unsafe to migrate.
+Additionally, don't migrate flags that you're using in running experiments. The script identifies these flags and marks them as unsafe to migrate.
 
 **Identifying how your user schema maps to your context schema**: Every customer structures their attributes differently. The script requires you to provide a map from their existing user schema to their newer context schema. The newer context schema could describe a single non-user context or it could describe a multi-context. If you omit user attributes from your schema, they will be ommitted from the migration. The "schema file format" section below provides for more information.
 
@@ -34,7 +34,7 @@ Additionally, don't migrate flags that you're using in an active and running exp
 
 Here are the steps you must complete the first time you run the script:
 
-1.  Navigate to the Authorization page in your LaunchDarkly UI at `<LD_HOST>/settings/authorization`. For example: https://app.launchdarkly.com/settings/authorization.
+1. Navigate to the Authorization page in your LaunchDarkly UI at `<LD_HOST>/settings/authorization`. For example: https://app.launchdarkly.com/settings/authorization.
 2. Create an API key. If you want to test the script without changing anything, the API key you use should at least have reader access to your project and environment. If you want to execute the migration, the API key must have sufficient access to submit approval requests to your project and environment. To learn more, read the [product documentation](https://docs.launchdarkly.com/home/account-security/api-access-tokens).
 3. Copy `.env.template` to `.env` and specify the API key you created.
 4. Load your env file: `source .env`
@@ -102,7 +102,7 @@ For example, given a user:
 {
   "kind": "multi",
   "account": {
-    "key": "key-123",
+    "key": "account-id-abc",
     "name": "Some Company"
   },
   "device": {
@@ -110,7 +110,7 @@ For example, given a user:
   },
   "user": {
     "key": "user-key-abc",
-    "name": "Some User",
+    "name": "User Name",
     "zipCode": 12345
   }
 }
