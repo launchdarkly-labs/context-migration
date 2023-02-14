@@ -109,7 +109,7 @@ For example, given a user:
     "key": "google-pixel-6"
   },
   "user": {
-    "key": "user-key-abc",
+    "key": "user-key-123",
     "name": "User Name",
     "zipCode": 12345
   }
