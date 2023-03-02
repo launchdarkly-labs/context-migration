@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	ldapi "github.com/launchdarkly/api-client-go/v10"
+	ldapi "github.com/launchdarkly/api-client-go/v12"
 )
 
 var (
@@ -424,7 +424,7 @@ func prepareApproval(flag ldapi.FeatureFlag, details flagDetails) int {
 			}
 
 			// POST the approval request to LaunchDarkly
-			_, r, err := client.ApprovalsApi.PostApprovalRequest(ctx, projectKey, flag.Key, envKey).CreateFlagConfigApprovalRequestRequest(req).Execute()
+			_, r, err := client.ApprovalsApi.PostApprovalRequestForFlag(ctx, projectKey, flag.Key, envKey).CreateFlagConfigApprovalRequestRequest(req).Execute()
 			if r.StatusCode == 403 {
 				// The customer doesn't have access to approvals.
 				fmt.Fprint(os.Stderr, "Failed to create an approval. Either your API key lacks sufficient permission or your LaunchDarkly plan doesn't include access to approvals. Update your API key or use the script in dry-run mode.\n")
